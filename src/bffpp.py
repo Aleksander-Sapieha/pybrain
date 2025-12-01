@@ -1,8 +1,50 @@
 # bffpp.py
 
 import sys
-import os
 import importlib.util
+import os
+
+loaded_files = set()
+
+def load_bf_file(path):
+    """Load a .bf file, handle nested imports, and return its contents."""
+    global loaded_files
+
+    path = os.path.abspath(path)
+
+    # Avoid re-importing the same file
+    if path in loaded_files:
+        return ""
+
+    loaded_files.add(path)
+
+    with open(path, "r") as f:
+        text = f.read()
+
+    lines = text.splitlines()
+    output = []
+
+    for line in lines:
+        line = line.strip()
+
+        if line.startswith("#import"):
+            # Parse import syntax #import "filename"
+            start = line.find('"') + 1
+            end = line.rfind('"')
+            file_path = line[start:end]
+
+            # Resolve relative to current file directory
+            dirpath = os.path.dirname(path)
+            file_path = os.path.join(dirpath, file_path)
+
+            # Recursively load imported file
+            imported_code = load_bf_file(file_path)
+            output.append(imported_code)
+        else:
+            output.append(line)
+
+    return "\n".join(output)
+
 
 external_functions = {}
 
@@ -60,7 +102,6 @@ def brainfuck_interpreter(code, input_func=input, output_func=print):
 
     while pc < code_len:
         cmd = code[pc]
-
         if cmd == '>':
             ptr += 1
         elif cmd == '<':
@@ -89,29 +130,42 @@ def brainfuck_interpreter(code, input_func=input, output_func=print):
             # Skip function body if not called
             end = [end for start, end in functions.values() if start == pc+1][0]
             pc = end
-        elif cmd == '&':  # Call external function
-            # Read function name and arguments from code
+        elif cmd == '&':
             pc += 1
+            
+            # === Parse function name ===
             start = pc
-            while pc < code_len and code[pc].isalnum():
+            while pc < code_len and (code[pc].isalnum() or code[pc] in "_"):
                 pc += 1
             func_name = code[start:pc]
-
-            # Skip space(s)
-            while pc < code_len and code[pc] == ' ':
+            
+            # Skip whitespace
+            while pc < code_len and code[pc].isspace():
                 pc += 1
 
-            # Read argument cell indices
+            # === Parse a list of integer arguments ===
             args = []
-            while pc < code_len and code[pc].isdigit():
+            while pc < code_len:
+                # If not a digit, stop parsing arguments
+                if not code[pc].isdigit():
+                    break
+                
+                # Parse multi-digit integer
                 arg_start = pc
                 while pc < code_len and code[pc].isdigit():
                     pc += 1
                 args.append(int(code[arg_start:pc]))
-                while pc < code_len and code[pc] == ' ':
+
+                # Skip whitespace before next argument
+                while pc < code_len and code[pc].isspace():
                     pc += 1
+
+            # Call the external function
             call_external(memory, func_name, args)
-            pc -= 1  # Adjust for main loop increment
+
+            # Adjust because main loop will increment pc
+            pc -= 1
+
 
         pc += 1
 
